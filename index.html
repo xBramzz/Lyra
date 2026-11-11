@@ -150,6 +150,7 @@ input[type=number]{font:inherit;color:inherit;background:rgba(255,255,255,.7);bo
 <label><span class="tm" style="color:inherit"><span>Preview text size</span><b data-show="fs" data-u=" px"></b></span><input type="range" data-k="fs" min="30" max="72" step="2"></label>
 <label>Video size<select data-k="res"><option value="720">720p</option><option value="1080">1080p</option></select></label>
 <label>Video frame rate<select data-k="fps"><option value="60">60 fps</option><option value="30">30 fps</option></select></label>
+<label>Whisper model (Whisper-time)<select data-k="asr"><option value="tiny">Tiny, English only (smaller, faster)</option><option value="base">Base, many languages (bigger, more accurate)</option></select></label><p class="hint" style="margin:0">Downloads once from Hugging Face, then runs on your device. Your audio is never uploaded.</p>
 <div class="row"><button id="reset">Reset all Lyra data</button></div><p class="hint" style="margin:0">Clears your draft, library and settings in this browser.</p></div></div></section>
 
 <section class="view" id="v-help" hidden><div class="card help"><h2>Help</h2><ol><li>Drop a song on the Studio tab.</li><li>Paste your lyrics and choose Start syncing.</li><li>Press Space as each line starts. Use Auto-time for a first guess.</li><li>Check the result on the Preview tab, then Export a file or a video.</li></ol>
@@ -159,7 +160,7 @@ input[type=number]{font:inherit;color:inherit;background:rgba(255,255,255,.7);bo
 <dialog id="dlg"><h2>Export</h2><select data-k="fm" id="xf"><option value="lrc">LRC</option><option value="elrc">Enhanced LRC (word timing)</option><option value="srt">SRT</option><option value="vtt">WebVTT</option><option value="txt">Plain text</option></select><textarea id="out" spellcheck="false"></textarea><div class="row"><button class="dark" id="copy">Copy</button><button id="dl">Save file</button><button id="close" style="margin-left:auto">Close</button></div></dialog>
 <script>
 const $=id=>document.getElementById(id),au=$("au"),RM=matchMedia("(prefers-reduced-motion:reduce)").matches,pad=n=>String(n).padStart(2,"0");
-let lines=[],sel=0,lastN=-2,st={follow:true,fill:true,off:0,fm:"lrc",bg:"rose",font:"Poppins",fx:"both",fs:46,res:"720",fps:"60",rate:1},H=[],Hr=[],abuf=null,peaks=null,regs=[],fr=0,P=0,view="studio",rec=null,seal=-1,chgT=0;
+let lines=[],sel=0,lastN=-2,st={follow:true,fill:true,off:0,fm:"lrc",bg:"rose",font:"Poppins",fx:"both",asr:"tiny",fs:46,res:"720",fps:"60",rate:1},H=[],Hr=[],abuf=null,peaks=null,regs=[],fr=0,P=0,view="studio",rec=null,seal=-1,chgT=0;
 const lt=t=>{const c=Math.round(t*100);return pad(Math.floor(c/6000))+":"+pad(Math.floor(c%6000/100))+"."+pad(c%100)};
 const clock=t=>{t=Math.max(0,t||0);return Math.floor(t/60)+":"+pad(Math.floor(t%60))};
 const hms=(t,sp)=>{const ms=Math.round(t*1000);return pad(Math.floor(ms/3600000))+":"+pad(Math.floor(ms/60000)%60)+":"+pad(Math.floor(ms/1000)%60)+sp+String(ms%1000).padStart(3,"0")};
@@ -359,4 +360,52 @@ document.querySelectorAll('#v-preview [data-k="font"],#v-preview [data-k="fx"]')
 if(!["rose","lav","pearl"].includes(st.bg))st.bg="rose";
 st.font=st.font||"Poppins";st.fx=st.fx||"both";syncUi();document.fonts.load("600 40px '"+st.font+"'").then(()=>{lay={key:""}});
 })();
-</script></body></html>
+</script><script>
+(()=>{
+const CDN="https://cdn.jsdelivr.net/npm/@huggingface/transformers@3.6.1/dist/transformers.min.js",M={tiny:"Xenova/whisper-tiny.en",base:"onnx-community/whisper-base_timestamped"};
+let pipe=null,pm="";
+const btn=document.createElement("button");btn.className="sm";btn.textContent="Whisper-time";btn.title="Listens to the vocals and places each line. Downloads a model the first time.";$("auto").after(btn);
+const nz=s=>s.toLowerCase().normalize("NFD").replace(/[\u0300-\u036f]/g,"").replace(/[^\p{L}\p{N}]/gu,"");
+const sc=(a,b)=>a===b?3:(a.length>3&&b.length>3&&(a.startsWith(b)||b.startsWith(a)))?1:-2;
+async function mono16(){const oc=new OfflineAudioContext(1,Math.ceil(abuf.duration*16000),16000),s=oc.createBufferSource();s.buffer=abuf;s.connect(oc.destination);s.start();return(await oc.startRendering()).getChannelData(0)}
+function align(words){
+ const Lw=[],wc=lines.map(()=>0);lines.forEach((l,i)=>l.s.split(/\s+/).forEach(w=>{const n=nz(w);if(n){Lw.push({i,n});wc[i]++}}));
+ const Aw=words.map(x=>({t:x.t,n:nz(x.w)})).filter(x=>x.n),L=Lw.length,A=Aw.length;if(!L||A<3)return null;
+ const W=A+1,D=new Int32Array((L+1)*W),G=-1;
+ for(let i=1;i<=L;i++)D[i*W]=i*G;for(let j=1;j<=A;j++)D[j]=j*G;
+ for(let i=1;i<=L;i++)for(let j=1;j<=A;j++)D[i*W+j]=Math.max(D[(i-1)*W+j-1]+sc(Lw[i-1].n,Aw[j-1].n),D[(i-1)*W+j]+G,D[i*W+j-1]+G);
+ const T=lines.map(()=>null),hit=lines.map(()=>0);let i=L,j=A;
+ while(i>0&&j>0){const s=sc(Lw[i-1].n,Aw[j-1].n);
+  if(D[i*W+j]===D[(i-1)*W+j-1]+s){if(s>0){const li=Lw[i-1].i;hit[li]++;if(T[li]===null||Aw[j-1].t<T[li])T[li]=Aw[j-1].t}i--;j--}
+  else if(D[i*W+j]===D[(i-1)*W+j]+G)i--;else j--}
+ if(T.every(t=>t===null))return null;
+ const g=lines.map((_,k)=>T[k]===null||hit[k]<wc[k]/2),n=lines.length;
+ for(let k=0;k<n;k++)if(T[k]===null){let p=k-1;while(p>=0&&T[p]===null)p--;let q=k+1;while(q<n&&T[q]===null)q++;
+  T[k]=p>=0&&q<n?T[p]+(T[q]-T[p])*(k-p)/(q-p):p>=0?T[p]+3*(k-p):Math.max(0,T[q]-3*(q-k))}
+ for(let k=1;k<n;k++)if(T[k]<=T[k-1])T[k]=T[k-1]+.05;
+ return{T,g}}
+btn.onclick=async()=>{
+ if(!abuf||!lines.length){toast("Load a song and lyrics first.");return}
+ if(btn.disabled)return;btn.disabled=true;const lab=btn.textContent;
+ try{
+  const mid=st.asr==="base"?"base":"tiny",id=M[mid];
+  if(!pipe||pm!==id){btn.textContent="Loading model...";
+   const TF=await import(CDN);TF.env.allowLocalModels=false;
+   pipe=await TF.pipeline("automatic-speech-recognition",id,{progress_callback:p=>{if(p.status==="progress")btn.textContent="Model "+Math.round(p.progress)+"%"}});pm=id}
+  btn.textContent="Preparing audio...";await new Promise(r=>setTimeout(r,30));
+  const a=await mono16(),WIN=28*16000,words=[];
+  for(let o=0;o<a.length;o+=WIN){
+   btn.textContent="Listening "+Math.min(99,Math.round(o/a.length*100))+"%";await new Promise(r=>setTimeout(r,30));
+   const seg=a.subarray(o,o+WIN);if(seg.length<8000)break;
+   let e=0;for(let k=0;k<seg.length;k+=16)e+=seg[k]*seg[k];if(Math.sqrt(e/(seg.length/16))<.004)continue;
+   const r=await pipe(seg,{return_timestamps:"word"});
+   (r.chunks||[]).forEach(c=>{const s=c.timestamp[0]||0;words.push({w:c.text,t:o/16000+s})})}
+  const res=align(words);
+  if(!res){toast("Whisper couldn't match the lyrics. Try the Base model or Auto-time.");return}
+  hist();lines.forEach((l,k)=>{l.t=res.T[k];if(res.g[k])l.a=true;else delete l.a});render();
+  toast("Placed "+lines.length+" lines by ear. Italic times are guesses, so check them.")
+ }catch(err){console.error(err);toast("Couldn't run Whisper. The first run needs internet, and it needs a modern browser.")}
+ finally{btn.disabled=false;btn.textContent=lab}};
+})();
+</script>
+</body></html>
