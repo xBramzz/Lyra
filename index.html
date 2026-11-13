@@ -199,9 +199,12 @@ function parseLrc(t){const out=[],re=/\[(\d+):(\d+(?:\.\d+)?)\]/g;
  for(const raw of t.replace(/\r/g,"").split("\n")){const m=raw.match(/^\[(ti|ar|al):(.*)\]\s*$/i);if(m){$(m[1].toLowerCase()).value=m[2].trim();continue}
   if(/^\[[a-z]{2,6}:[^\]]*\]\s*$/i.test(raw))continue;
   const ts=[...raw.matchAll(re)].map(x=>+x[1]*60+parseFloat(x[2])),s=raw.replace(re,"").replace(/<\d+:\d+(?:\.\d+)?>/g,"").trim();
-  if(ts.length)ts.forEach(t=>out.push({t,s}));else if(s)out.push({t:null,s})}return out}
+  if(ts.length){if(s)ts.forEach(t=>out.push({t,s}))}else if(s)out.push({t:null,s})}return out}
 function parseSrt(t){const out=[];for(const b of t.replace(/\r/g,"").split(/\n\n+/)){const p=b.split("\n"),i=p.findIndex(x=>x.includes("-->"));if(i<0)continue;const m=p[i].match(/(\d+):(\d+):(\d+)[,.](\d+)/),s=p.slice(i+1).join(" ").trim();if(m&&s)out.push({t:+m[1]*3600+ +m[2]*60+ +m[3]+ +("0."+m[4]),s})}return out}
-$("use").onclick=()=>{const old=lines;setLines(plain($("txt").value).map((l,i)=>old[i]&&old[i].s===l.s?{t:old[i].t,s:l.s}:l))};
+const hasLrc=v=>/^\s*\[\d+:\d+(?:\.\d+)?\]/m.test(v);
+function useText(){const v=$("txt").value;let a;if(hasLrc(v)){a=parseLrc(v).filter(l=>l.s).sort((x,y)=>(x.t??1e9)-(y.t??1e9));$("txt").value=a.map(l=>l.s).join("\n")}else{const old=lines;a=plain(v).map((l,i)=>old[i]&&old[i].s===l.s?{t:old[i].t,s:l.s}:l)}setLines(a);if(a.some(l=>l.t!=null))toast("Imported "+a.filter(l=>l.t!=null).length+" timed lines.")}
+$("use").onclick=useText;
+$("txt").addEventListener("paste",()=>setTimeout(()=>{if(hasLrc($("txt").value))useText()},0));
 $("edtxt").onclick=()=>{$("txt").value=lines.map(l=>l.s).join("\n");$("paste").hidden=false;$("list").hidden=true;$("edtxt").hidden=true;$("keys").hidden=true};
 async function importText(f){const t=await f.text(),a=/\.srt$/i.test(f.name)?parseSrt(t):/\[\d+:\d+/.test(t)?parseLrc(t):plain(t);$("txt").value=a.map(l=>l.s).join("\n");setLines(a)}
 /* audio */
